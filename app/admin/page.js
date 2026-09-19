@@ -4,6 +4,12 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 
 export default function AdminPage() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+
   const [name, setName] = useState('');
   const [price, setPrice] = useState('');
   const [description, setDescription] = useState('');
@@ -11,6 +17,34 @@ export default function AdminPage() {
   const [sizesInput, setSizesInput] = useState('40,42,44,46,48,50');
   const [message, setMessage] = useState('');
   const [products, setProducts] = useState([]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setLoading(false);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (session) loadProducts();
+  }, [session]);
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoginError('');
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) setLoginError('بيانات الدخول غلط');
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
 
   async function loadProducts() {
     const { data } = await supabase
@@ -20,22 +54,13 @@ export default function AdminPage() {
     setProducts(data || []);
   }
 
-  useEffect(() => {
-    loadProducts();
-  }, []);
-
   async function handleSubmit(e) {
     e.preventDefault();
     setMessage('جاري الإضافة...');
 
     const { data: product, error } = await supabase
       .from('products')
-      .insert({
-        name,
-        price: parseFloat(price),
-        description,
-        image_url: imageUrl,
-      })
+      .insert({ name, price: parseFloat(price), description, image_url: imageUrl })
       .select()
       .single();
 
@@ -45,12 +70,7 @@ export default function AdminPage() {
     }
 
     const sizes = sizesInput.split(',').map((s) => s.trim()).filter(Boolean);
-    const sizeRows = sizes.map((size) => ({
-      product_id: product.id,
-      size,
-      sold_out: false,
-    }));
-
+    const sizeRows = sizes.map((size) => ({ product_id: product.id, size, sold_out: false }));
     await supabase.from('product_sizes').insert(sizeRows);
 
     setMessage('تمت إضافة الفستان بنجاح ✅');
@@ -62,10 +82,7 @@ export default function AdminPage() {
   }
 
   async function toggleSoldOut(sizeId, current) {
-    await supabase
-      .from('product_sizes')
-      .update({ sold_out: !current })
-      .eq('id', sizeId);
+    await supabase.from('product_sizes').update({ sold_out: !current }).eq('id', sizeId);
     loadProducts();
   }
 
@@ -75,31 +92,45 @@ export default function AdminPage() {
     loadProducts();
   }
 
+  if (loading) return <div style={{ padding: 40, textAlign: 'center' }}>جاري التحميل...</div>;
+
+  if (!session) {
+    return (
+      <div style={{ maxWidth: 360, margin: '80px auto', padding: 24, fontFamily: 'Cairo, sans-serif' }}>
+        <h2 style={{ fontFamily: 'Cormorant Garamond, serif', textAlign: 'center' }}>تسجيل دخول الإدارة</h2>
+        <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <input type="email" placeholder="الإيميل" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} />
+          <input type="password" placeholder="كلمة السر" value={password} onChange={(e) => setPassword(e.target.value)} required style={inputStyle} />
+          <button type="submit" style={buttonStyle}>دخول</button>
+          {loginError && <p style={{ color: 'red' }}>{loginError}</p>}
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: 640, margin: '0 auto', padding: 24, fontFamily: 'Cairo, sans-serif' }}>
-      <h1 style={{ fontFamily: 'Cormorant Garamond, serif' }}>لوحة إدارة أوليفر فاشن</h1>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ fontFamily: 'Cormorant Garamond, serif' }}>لوحة إدارة أوليفر فاشن</h1>
+        <button onClick={handleLogout} style={{ border: 'none', background: 'none', color: '#c08a3e', cursor: 'pointer' }}>خروج</button>
+      </div>
 
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 40 }}>
         <label>اسم الفستان
           <input value={name} onChange={(e) => setName(e.target.value)} required style={inputStyle} />
         </label>
-
         <label>السعر (ر.ق)
           <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} required style={inputStyle} />
         </label>
-
         <label>وصف مختصر
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} style={inputStyle} />
         </label>
-
         <label>رابط الصورة (من Supabase Storage أو أي رابط مباشر)
           <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} style={inputStyle} />
         </label>
-
         <label>المقاسات (مفصولة بفاصلة)
           <input value={sizesInput} onChange={(e) => setSizesInput(e.target.value)} style={inputStyle} />
         </label>
-
         <button type="submit" style={buttonStyle}>إضافة الفستان</button>
         {message && <p>{message}</p>}
       </form>
